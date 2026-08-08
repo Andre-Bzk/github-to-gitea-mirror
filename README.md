@@ -10,15 +10,15 @@ Mirrors **all** GitHub repositories of a user into a self-hosted Gitea instance
 as pull mirrors — including repositories created later.
 
 Gitea can already mirror a single repository through its web UI. What it cannot
-do is watch an account and pick up new repositories on its own. That gap is the
-only reason this script exists: a daily cron job asks the GitHub API which
-repositories exist and creates the mirrors that are missing. Keeping their
-*content* up to date remains Gitea's job.
+do is watch an account and pick up new repositories on its own, or continuously
+mirror GitHub release metadata and uploaded assets. A cron job closes both gaps.
+Keeping the repositories' *git content* up to date remains Gitea's job.
 
 | Task | Handled by | Frequency |
 | --- | --- | --- |
 | Discover **new** repositories, create mirrors | this script (cron) | daily |
 | Pull new commits into **existing** mirrors | Gitea itself | `MIRROR_INTERVAL` |
+| Synchronize release metadata and uploaded assets | this script (cron) | daily |
 
 ### Requirements
 
@@ -74,6 +74,8 @@ python3 sync_mirrors.py                # run for real
 | `MIRROR_INTERVAL` | Go duration, e.g. `24h`, `8h`, `30m` |
 | `INCLUDE_FORKS` | Mirror forks too (default `false`) |
 | `INCLUDE_ARCHIVED` | Mirror archived repositories (default `true`) |
+| `SYNC_RELEASES` | Synchronize GitHub releases on every run (default `true`) |
+| `SYNC_RELEASE_ASSETS` | Download uploaded release assets too (default `true`) |
 | `DRY_RUN` | `true` = show what would happen, change nothing |
 
 Every key can be overridden by an environment variable of the same name, which
@@ -107,13 +109,20 @@ remaining validity, warns from 14 days out and exits non-zero once expired:
 
 ### Scope and limits
 
-- Mirrored is **git data only**: all branches and tags. Issues, pull requests,
-  releases and the wiki are excluded on purpose — a pull mirror never syncs
-  those, so importing them once would leave a snapshot that silently goes
-  stale. To change that, flip the flags in `create_mirror()`.
+- Gitea mirrors **git data** itself: all branches and tags. The script separately
+  synchronizes GitHub release titles, notes, draft/prerelease state and uploaded
+  assets on every run. Issues, pull requests and the wiki remain excluded.
+- A release is synchronized only after its git tag has reached Gitea. If the tag
+  is still missing, the release is logged and retried by the next cron run.
+- Source archives generated automatically for a tag are not copied because
+  Gitea generates its own. Assets explicitly uploaded to GitHub are copied.
 - The script **never deletes** anything in Gitea. If a repository disappears or
   is renamed on GitHub, its mirror stays and is reported as an orphan in the
-  log — for a backup that is the right direction.
+  log — for a backup that is the right direction. The same applies to releases
+  and assets deleted upstream. An asset with the same name but a different size
+  is reported, while the existing Gitea copy is retained.
+- GitHub author identities, original release timestamps and download counters
+  cannot be reproduced through Gitea's regular release API.
 - A Gitea repository that exists but is **not** a mirror is left untouched, so
   a real working repository can never be overwritten.
 - Mirrors are read-only in Gitea. Push to GitHub, not to the mirror.
@@ -122,12 +131,21 @@ remaining validity, warns from 14 days out and exits non-zero once expired:
 
 | File | Purpose |
 | --- | --- |
-| `sync_mirrors.py` | Creates missing mirrors, aligns the mirror interval |
+| `sync_mirrors.py` | Creates mirrors, aligns intervals and synchronizes releases |
+| `tests/` | Unit tests for repeatable release synchronization |
 | `run_sync.sh` | Cron wrapper: appends to `sync.log`, trims it to 1000 lines |
 | `install.sh` | Installs scripts, config and cron entry |
 | `mirror.env.example` | Configuration template |
 | `mirror.env` | Real config with secrets — git-ignored, `chmod 600` |
 | `sync.log` | Last ~2000 log lines |
+
+### Tests
+
+Run the unit tests from the repository root:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
 
 ### Troubleshooting
 
@@ -141,6 +159,8 @@ tail -f ~/gitea-github-mirror/sync.log
 | `GitHub API 403` | Rate limit, or token lacks repository access |
 | `migrate failed (HTTP 409)` | Name already taken in Gitea |
 | `... exists in Gitea but is not a mirror` | Real repo with that name — rename one of them |
+| `release ... waits for its tag` | Gitea has not fetched the GitHub tag yet; the next run retries it |
+| `asset ... differs` | An upstream asset changed; the retained Gitea backup is not overwritten |
 | `Missing config value(s)` | `mirror.env` not filled in |
 | `no private repositories` despite a token | Token's repository access is "Public repositories", or no repository permission is set at all |
 
@@ -167,14 +187,15 @@ selbst gehostete Gitea-Instanz — auch Repositories, die erst später entstehen
 
 Ein einzelnes Repository kann Gitea bereits über die Weboberfläche spiegeln.
 Was Gitea nicht kann: einen Account beobachten und neue Repositories von selbst
-aufnehmen. Genau dafür gibt es dieses Skript — ein täglicher Cron-Job fragt die
-GitHub-API, welche Repositories existieren, und legt die fehlenden Mirrors an.
-Deren *Inhalt* aktuell zu halten bleibt Giteas Aufgabe.
+aufnehmen oder GitHub-Release-Metadaten und hochgeladene Assets fortlaufend
+spiegeln. Ein Cron-Job schließt beide Lücken. Die *Git-Inhalte* aktuell zu halten
+bleibt Giteas Aufgabe.
 
 | Aufgabe | Erledigt von | Häufigkeit |
 | --- | --- | --- |
 | **Neue** Repositories finden, Mirror anlegen | dieses Skript (Cron) | täglich |
 | Commits in **bestehende** Mirrors holen | Gitea selbst | `MIRROR_INTERVAL` |
+| Release-Metadaten und hochgeladene Assets synchronisieren | dieses Skript (Cron) | täglich |
 
 ### Voraussetzungen
 
@@ -230,6 +251,8 @@ python3 sync_mirrors.py                # echter Lauf
 | `MIRROR_INTERVAL` | Go-Duration, z. B. `24h`, `8h`, `30m` |
 | `INCLUDE_FORKS` | Forks mitspiegeln (Standard `false`) |
 | `INCLUDE_ARCHIVED` | Archivierte Repositories spiegeln (Standard `true`) |
+| `SYNC_RELEASES` | GitHub-Releases bei jedem Lauf synchronisieren (Standard `true`) |
+| `SYNC_RELEASE_ASSETS` | Auch hochgeladene Release-Assets laden (Standard `true`) |
 | `DRY_RUN` | `true` = nur anzeigen, nichts ändern |
 
 Jeder Schlüssel lässt sich durch eine gleichnamige Umgebungsvariable
@@ -266,13 +289,22 @@ Ablauf mit Exit-Code 1:
 
 ### Umfang und Grenzen
 
-- Gespiegelt werden **nur Git-Daten**: alle Branches und Tags. Issues, Pull
-  Requests, Releases und Wiki bleiben bewusst außen vor — ein Pull-Mirror
-  synchronisiert das nie, ein einmaliger Import würde also stillschweigend
-  veralten. Umstellbar über die Flags in `create_mirror()`.
+- Gitea selbst spiegelt die **Git-Daten**: alle Branches und Tags. Das Skript
+  synchronisiert zusätzlich bei jedem Lauf GitHub-Release-Titel, Beschreibung,
+  Draft-/Prerelease-Status und hochgeladene Assets. Issues, Pull Requests und
+  Wiki bleiben außen vor.
+- Ein Release wird erst synchronisiert, wenn sein Git-Tag in Gitea angekommen
+  ist. Fehlt der Tag noch, wird das protokolliert und beim nächsten Cron-Lauf
+  erneut versucht.
+- Automatisch für Tags erzeugte Quellcodearchive werden nicht kopiert, weil
+  Gitea eigene erzeugt. Explizit auf GitHub hochgeladene Assets werden kopiert.
 - Das Skript **löscht nie** etwas in Gitea. Verschwindet ein Repository auf
   GitHub oder wird umbenannt, bleibt der Mirror bestehen und wird im Log als
-  verwaist gemeldet — für ein Backup ist das die richtige Richtung.
+  verwaist gemeldet — für ein Backup ist das die richtige Richtung. Gleiches
+  gilt für upstream gelöschte Releases und Assets. Hat ein gleichnamiges Asset
+  eine andere Größe, wird dies gemeldet und die Gitea-Kopie behalten.
+- GitHub-Autoren, ursprüngliche Release-Zeitpunkte und Downloadzähler können
+  über die reguläre Gitea-Release-API nicht identisch übernommen werden.
 - Ein Gitea-Repository, das existiert, aber **kein** Mirror ist, wird nicht
   angefasst; ein echtes Arbeits-Repository kann so nie überschrieben werden.
 - Mirrors sind in Gitea schreibgeschützt. Gepusht wird nach GitHub, nicht in
@@ -282,12 +314,21 @@ Ablauf mit Exit-Code 1:
 
 | Datei | Zweck |
 | --- | --- |
-| `sync_mirrors.py` | Legt fehlende Mirrors an, gleicht das Mirror-Intervall ab |
+| `sync_mirrors.py` | Legt Mirrors an, gleicht Intervalle ab und synchronisiert Releases |
+| `tests/` | Unit-Tests für die wiederholbare Release-Synchronisierung |
 | `run_sync.sh` | Cron-Wrapper: schreibt nach `sync.log`, kürzt es auf 1000 Zeilen |
 | `install.sh` | Installiert Skripte, Konfiguration und Cron-Eintrag |
 | `mirror.env.example` | Konfigurationsvorlage |
 | `mirror.env` | Echte Konfiguration mit Secrets — git-ignoriert, `chmod 600` |
 | `sync.log` | Die letzten ~2000 Log-Zeilen |
+
+### Tests
+
+Die Unit-Tests im Wurzelverzeichnis des Repositorys starten:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
 
 ### Fehlersuche
 
@@ -301,6 +342,8 @@ tail -f ~/gitea-github-mirror/sync.log
 | `GitHub API 403` | Rate Limit, oder Token hat keinen Repository-Zugriff |
 | `migrate failed (HTTP 409)` | Name in Gitea bereits vergeben |
 | `... exists in Gitea but is not a mirror` | Echtes Repo gleichen Namens — eines umbenennen |
+| `release ... waits for its tag` | Gitea hat den GitHub-Tag noch nicht geholt; der nächste Lauf versucht es erneut |
+| `asset ... differs` | Ein Upstream-Asset wurde geändert; das Gitea-Backup wird nicht überschrieben |
 | `Missing config value(s)` | `mirror.env` nicht ausgefüllt |
 | `no private repositories` trotz Token | Repository access steht auf „Public repositories", oder es ist gar keine Repository-Permission gesetzt |
 
