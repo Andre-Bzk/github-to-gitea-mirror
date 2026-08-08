@@ -9,7 +9,7 @@
 set -eu
 
 SRC="$(dirname "$(readlink -f "$0")")"
-TARGET="${TARGET:-$HOME/gitea-github-mirror}"
+TARGET="${TARGET:-$HOME/github-to-gitea-mirror}"
 CRON_TIME="${CRON_TIME:-30 4}"
 
 say() { printf '%s\n' "$*"; }

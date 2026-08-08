@@ -1,1 +1,1 @@
-"""Tests for gitea-github-mirror."""
+"""Tests for github-to-gitea-mirror."""

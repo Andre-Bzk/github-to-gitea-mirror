@@ -95,7 +95,7 @@ def api(url, token=None, scheme="token", method="GET", payload=None):
     data = None
     headers = {
         "Accept": "application/json",
-        "User-Agent": "gitea-github-mirror/1.0",
+        "User-Agent": "github-to-gitea-mirror/1.0",
     }
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
@@ -137,7 +137,7 @@ def download_github_asset(cfg, asset):
     """Download a release asset into a temporary file without buffering it in RAM."""
     headers = {
         "Accept": "application/octet-stream",
-        "User-Agent": "gitea-github-mirror/1.0",
+        "User-Agent": "github-to-gitea-mirror/1.0",
     }
     if cfg["GITHUB_TOKEN"]:
         headers["Authorization"] = "Bearer %s" % cfg["GITHUB_TOKEN"]
@@ -169,7 +169,7 @@ def upload_release_asset(cfg, repo_name, release_id, asset, source, size):
            % (cfg["GITEA_URL"], path_part(cfg["GITEA_OWNER"]), path_part(repo_name),
               release_id, query))
     parsed = urllib.parse.urlsplit(url)
-    boundary = "----gitea-github-mirror-%s" % uuid.uuid4().hex
+    boundary = "----github-to-gitea-mirror-%s" % uuid.uuid4().hex
     safe_name = str(asset["name"]).replace("\\", "_").replace('"', "_")
     safe_name = safe_name.replace("\r", "_").replace("\n", "_")
     content_type = asset.get("content_type") or "application/octet-stream"
@@ -195,7 +195,7 @@ def upload_release_asset(cfg, repo_name, release_id, asset, source, size):
         conn.putheader("Accept", "application/json")
         conn.putheader("Content-Type", "multipart/form-data; boundary=%s" % boundary)
         conn.putheader("Content-Length", str(len(preamble) + size + len(ending)))
-        conn.putheader("User-Agent", "gitea-github-mirror/1.0")
+        conn.putheader("User-Agent", "github-to-gitea-mirror/1.0")
         conn.endheaders()
         conn.send(preamble)
         while True:

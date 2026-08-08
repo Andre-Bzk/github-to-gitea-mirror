@@ -32,12 +32,12 @@ with 1 GB RAM the sync is invisible in `free -h`.
 ### Installation
 
 ```bash
-git clone <this-repo> gitea-github-mirror
-cd gitea-github-mirror
+git clone <this-repo> github-to-gitea-mirror
+cd github-to-gitea-mirror
 ./install.sh
 ```
 
-`install.sh` copies the scripts to `~/gitea-github-mirror`, creates `mirror.env`
+`install.sh` copies the scripts to `~/github-to-gitea-mirror`, creates `mirror.env`
 from the example, fixes permissions and adds the cron entry. It is safe to
 re-run — an existing `mirror.env` is never overwritten.
 
@@ -57,7 +57,7 @@ docker exec -u git <container> gitea admin user generate-access-token \
 Then fill in `mirror.env` and verify:
 
 ```bash
-cd ~/gitea-github-mirror
+cd ~/github-to-gitea-mirror
 DRY_RUN=true python3 sync_mirrors.py   # preview, changes nothing
 python3 sync_mirrors.py                # run for real
 ```
@@ -150,7 +150,7 @@ python3 -m unittest discover -s tests -v
 ### Troubleshooting
 
 ```bash
-tail -f ~/gitea-github-mirror/sync.log
+tail -f ~/github-to-gitea-mirror/sync.log
 ```
 
 | Log line | Cause |
@@ -209,12 +209,12 @@ Raspberry Pi 3B mit 1 GB RAM ist der Sync in `free -h` nicht zu sehen.
 ### Installation
 
 ```bash
-git clone <dieses-repo> gitea-github-mirror
-cd gitea-github-mirror
+git clone <dieses-repo> github-to-gitea-mirror
+cd github-to-gitea-mirror
 ./install.sh
 ```
 
-`install.sh` kopiert die Skripte nach `~/gitea-github-mirror`, legt `mirror.env`
+`install.sh` kopiert die Skripte nach `~/github-to-gitea-mirror`, legt `mirror.env`
 aus der Vorlage an, setzt die Rechte und trägt den Cron-Job ein. Mehrfaches
 Ausführen ist unbedenklich — eine vorhandene `mirror.env` wird nie überschrieben.
 
@@ -234,7 +234,7 @@ docker exec -u git <container> gitea admin user generate-access-token \
 Danach `mirror.env` ausfüllen und prüfen:
 
 ```bash
-cd ~/gitea-github-mirror
+cd ~/github-to-gitea-mirror
 DRY_RUN=true python3 sync_mirrors.py   # Vorschau, ändert nichts
 python3 sync_mirrors.py                # echter Lauf
 ```
@@ -333,7 +333,7 @@ python3 -m unittest discover -s tests -v
 ### Fehlersuche
 
 ```bash
-tail -f ~/gitea-github-mirror/sync.log
+tail -f ~/github-to-gitea-mirror/sync.log
 ```
 
 | Log-Zeile | Ursache |
