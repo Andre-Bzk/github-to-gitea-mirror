@@ -18,6 +18,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from collections import namedtuple
 from datetime import datetime, timezone
 
 KNOWN_KEYS = (
@@ -37,18 +38,11 @@ KNOWN_KEYS = (
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.environ.get("MIRROR_ENV", os.path.join(SCRIPT_DIR, "mirror.env"))
 
-errors = 0
-last_headers = {}
+Response = namedtuple("Response", "status body headers")
 
 
 def log(level, msg):
     print("%s [%s] %s" % (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), level, msg), flush=True)
-
-
-def fail(msg):
-    global errors
-    errors += 1
-    log("ERROR", msg)
 
 
 def load_config():
@@ -91,7 +85,7 @@ def truthy(value):
 
 
 def api(url, token=None, scheme="token", method="GET", payload=None):
-    """Return (status, parsed_body). Raises urllib.error.HTTPError on >=400."""
+    """Return a Response. Raises urllib.error.HTTPError on >=400."""
     data = None
     headers = {
         "Accept": "application/json",
@@ -106,9 +100,11 @@ def api(url, token=None, scheme="token", method="GET", payload=None):
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     with urllib.request.urlopen(req, timeout=180) as resp:
         body = resp.read().decode("utf-8")
-        last_headers.clear()
-        last_headers.update({k.lower(): v for k, v in resp.headers.items()})
-        return resp.status, (json.loads(body) if body.strip() else None)
+        return Response(
+            resp.status,
+            json.loads(body) if body.strip() else None,
+            {k.lower(): v for k, v in resp.headers.items()},
+        )
 
 
 def path_part(value):
@@ -215,9 +211,15 @@ def upload_release_asset(cfg, repo_name, release_id, asset, source, size):
 
 
 def github_repos(cfg):
-    """All repos owned by the user; private ones included when a token is set."""
+    """Return (repos, headers of the last GitHub response).
+
+    The headers travel with the result because the token expiry check needs
+    them; keeping them here makes that dependency visible at the call site.
+    Private repos are included when a token is set.
+    """
     token = cfg["GITHUB_TOKEN"]
     repos = []
+    headers = {}
     page = 1
     while True:
         if token:
@@ -226,7 +228,9 @@ def github_repos(cfg):
         else:
             url = ("https://api.github.com/users/%s/repos"
                    "?per_page=100&type=owner&page=%d" % (cfg["GITHUB_USER"], page))
-        _, batch = api(url, token=token, scheme="Bearer")
+        resp = api(url, token=token, scheme="Bearer")
+        headers = resp.headers
+        batch = resp.body
         if not batch:
             break
         repos.extend(batch)
@@ -238,17 +242,18 @@ def github_repos(cfg):
         # affiliation=owner still returns repos owned by orgs the user belongs to
         repos = [r for r in repos
                  if r["owner"]["login"].lower() == cfg["GITHUB_USER"].lower()]
-    return repos
+    return repos, headers
 
 
-def warn_token_expiry():
+def warn_token_expiry(headers):
     """Fine-grained PATs always expire; a silent expiry would stall the mirror.
 
     GitHub reports the date in a response header, so every run can check it.
+    Returns the number of errors found, so an expired token can fail the run.
     """
-    raw = last_headers.get("github-authentication-token-expiration")
+    raw = headers.get("github-authentication-token-expiration")
     if not raw:
-        return  # classic token without expiry, or no token at all
+        return 0  # classic token without expiry, or no token at all
     text = raw.strip().replace(" UTC", "").replace("Z", "").replace("T", " ")
     parsed = None
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S %z", "%Y-%m-%d"):
@@ -258,17 +263,19 @@ def warn_token_expiry():
         except ValueError:
             continue
     if parsed is None:
-        return
+        return 0
 
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     days = (parsed.replace(tzinfo=None) - now_utc).days
     if days < 0:
-        fail("GITHUB_TOKEN expired on %s - renew it" % parsed.date())
-    elif days <= 14:
+        log("ERROR", "GITHUB_TOKEN expired on %s - renew it" % parsed.date())
+        return 1
+    if days <= 14:
         log("WARN", "GITHUB_TOKEN expires in %d day(s), on %s - renew it"
             % (days, parsed.date()))
     else:
         log("INFO", "GITHUB_TOKEN valid until %s (%d days)" % (parsed.date(), days))
+    return 0
 
 
 def duration_seconds(value):
@@ -285,9 +292,8 @@ def duration_seconds(value):
 
 def gitea_repo(cfg, name):
     try:
-        _, repo = api("%s/api/v1/repos/%s/%s" % (cfg["GITEA_URL"], cfg["GITEA_OWNER"], name),
-                      token=cfg["GITEA_TOKEN"])
-        return repo
+        return api("%s/api/v1/repos/%s/%s" % (cfg["GITEA_URL"], cfg["GITEA_OWNER"], name),
+                   token=cfg["GITEA_TOKEN"]).body
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return None
@@ -347,7 +353,7 @@ def github_releases(cfg, repo_name):
     while True:
         url = ("https://api.github.com/repos/%s/%s/releases?per_page=100&page=%d"
                % (path_part(cfg["GITHUB_USER"]), path_part(repo_name), page))
-        _, batch = api(url, token=cfg["GITHUB_TOKEN"], scheme="Bearer")
+        batch = api(url, token=cfg["GITHUB_TOKEN"], scheme="Bearer").body
         if not batch:
             break
         releases.extend(batch)
@@ -364,7 +370,7 @@ def github_release_assets(cfg, repo_name, release_id):
         url = ("https://api.github.com/repos/%s/%s/releases/%s/assets"
                "?per_page=100&page=%d"
                % (path_part(cfg["GITHUB_USER"]), path_part(repo_name), release_id, page))
-        _, batch = api(url, token=cfg["GITHUB_TOKEN"], scheme="Bearer")
+        batch = api(url, token=cfg["GITHUB_TOKEN"], scheme="Bearer").body
         if not batch:
             break
         assets.extend(batch)
@@ -381,7 +387,7 @@ def gitea_releases(cfg, repo_name):
         url = ("%s/api/v1/repos/%s/%s/releases?limit=50&page=%d"
                % (cfg["GITEA_URL"], path_part(cfg["GITEA_OWNER"]),
                   path_part(repo_name), page))
-        _, batch = api(url, token=cfg["GITEA_TOKEN"])
+        batch = api(url, token=cfg["GITEA_TOKEN"]).body
         if not batch:
             break
         releases.extend(batch)
@@ -398,7 +404,7 @@ def gitea_tags(cfg, repo_name):
         url = ("%s/api/v1/repos/%s/%s/tags?limit=50&page=%d"
                % (cfg["GITEA_URL"], path_part(cfg["GITEA_OWNER"]),
                   path_part(repo_name), page))
-        _, batch = api(url, token=cfg["GITEA_TOKEN"])
+        batch = api(url, token=cfg["GITEA_TOKEN"]).body
         if not batch:
             break
         tags.update(tag["name"] for tag in batch)
@@ -448,7 +454,8 @@ def release_update_payload(source):
 
 
 def sync_release_assets(cfg, repo_name, source_release, target_release, dry_run):
-    copied = preserved = 0
+    """Return (copied, preserved, failed) counts for this release's assets."""
+    copied = preserved = failed = 0
     source_assets = github_release_assets(cfg, repo_name, source_release["id"])
     target_assets = {asset["name"]: asset for asset in target_release.get("assets", [])}
 
@@ -482,19 +489,22 @@ def sync_release_assets(cfg, repo_name, source_release, target_release, dry_run)
                 % (repo_name, source_release["tag_name"], name, size))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:300]
-            fail("%s release %s asset %s failed (HTTP %s): %s"
-                 % (repo_name, source_release["tag_name"], name, exc.code, detail))
+            log("ERROR", "%s release %s asset %s failed (HTTP %s): %s"
+                % (repo_name, source_release["tag_name"], name, exc.code, detail))
+            failed += 1
         except Exception as exc:
-            fail("%s release %s asset %s failed: %s"
-                 % (repo_name, source_release["tag_name"], name, exc))
+            log("ERROR", "%s release %s asset %s failed: %s"
+                % (repo_name, source_release["tag_name"], name, exc))
+            failed += 1
         finally:
             if tmp is not None:
                 tmp.close()
-    return copied, preserved
+    return copied, preserved, failed
 
 
 def sync_releases(cfg, repo_name, dry_run):
-    stats = {"created": 0, "updated": 0, "assets": 0, "preserved": 0, "waiting": 0}
+    stats = {"created": 0, "updated": 0, "assets": 0, "preserved": 0,
+             "waiting": 0, "errors": 0}
     source_releases = github_releases(cfg, repo_name)
     target_releases = gitea_releases(cfg, repo_name)
     by_tag = {release["tag_name"]: release for release in target_releases}
@@ -529,38 +539,41 @@ def sync_releases(cfg, repo_name, dry_run):
                     target = {"id": source["id"], "tag_name": tag, "assets": []}
                     log("DRY", "would create %s release %s" % (repo_name, tag))
                 else:
-                    _, target = api(
+                    target = api(
                         "%s/api/v1/repos/%s/%s/releases"
                         % (cfg["GITEA_URL"], path_part(cfg["GITEA_OWNER"]),
                            path_part(repo_name)),
                         token=cfg["GITEA_TOKEN"], method="POST",
-                        payload=release_payload(source))
+                        payload=release_payload(source)).body
                     log("OK", "created %s release %s" % (repo_name, tag))
                 stats["created"] += 1
             elif release_needs_update(source, target):
                 if dry_run:
                     log("DRY", "would update %s release %s" % (repo_name, tag))
                 else:
-                    _, target = api(
+                    target = api(
                         "%s/api/v1/repos/%s/%s/releases/%s"
                         % (cfg["GITEA_URL"], path_part(cfg["GITEA_OWNER"]),
                            path_part(repo_name), target["id"]),
                         token=cfg["GITEA_TOKEN"], method="PATCH",
-                        payload=release_update_payload(source))
+                        payload=release_update_payload(source)).body
                     log("OK", "updated %s release %s" % (repo_name, tag))
                 stats["updated"] += 1
 
             if truthy(cfg["SYNC_RELEASE_ASSETS"]):
-                copied, preserved = sync_release_assets(
+                copied, preserved, failed = sync_release_assets(
                     cfg, repo_name, source, target, dry_run)
                 stats["assets"] += copied
                 stats["preserved"] += preserved
+                stats["errors"] += failed
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:300]
-            fail("%s release %s failed (HTTP %s): %s"
-                 % (repo_name, tag, exc.code, detail))
+            log("ERROR", "%s release %s failed (HTTP %s): %s"
+                % (repo_name, tag, exc.code, detail))
+            stats["errors"] += 1
         except Exception as exc:
-            fail("%s release %s failed: %s" % (repo_name, tag, exc))
+            log("ERROR", "%s release %s failed: %s" % (repo_name, tag, exc))
+            stats["errors"] += 1
     return stats
 
 
@@ -578,7 +591,7 @@ def main():
         log("WARN", "GITHUB_TOKEN is empty - private repositories will be skipped")
 
     try:
-        repos = github_repos(cfg)
+        repos, github_headers = github_repos(cfg)
     except urllib.error.HTTPError as exc:
         log("ERROR", "GitHub API %s: %s" % (exc.code, exc.read().decode("utf-8", "replace")[:300]))
         return 2
@@ -586,7 +599,7 @@ def main():
         log("ERROR", "GitHub API unreachable: %s" % exc)
         return 2
 
-    warn_token_expiry()  # must run before any Gitea call overwrites the headers
+    errors = warn_token_expiry(github_headers)
 
     if not truthy(cfg["INCLUDE_FORKS"]):
         repos = [r for r in repos if not r.get("fork")]
@@ -614,7 +627,8 @@ def main():
         try:
             existing = gitea_repo(cfg, name)
         except Exception as exc:
-            fail("%s: cannot query Gitea: %s" % (name, exc))
+            log("ERROR", "%s: cannot query Gitea: %s" % (name, exc))
+            errors += 1
             continue
 
         if existing is None:
@@ -625,9 +639,11 @@ def main():
                 mirror_created = True
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", "replace")[:300]
-                fail("%s: migrate failed (HTTP %s): %s" % (name, exc.code, detail))
+                log("ERROR", "%s: migrate failed (HTTP %s): %s" % (name, exc.code, detail))
+                errors += 1
             except Exception as exc:
-                fail("%s: migrate failed: %s" % (name, exc))
+                log("ERROR", "%s: migrate failed: %s" % (name, exc))
+                errors += 1
 
             if mirror_created and truthy(cfg["SYNC_RELEASES"]):
                 try:
@@ -640,8 +656,10 @@ def main():
                         stats = sync_releases(cfg, name, dry_run)
                         for key in release_totals:
                             release_totals[key] += stats[key]
+                        errors += stats["errors"]
                 except Exception as exc:
-                    fail("%s: could not synchronize releases: %s" % (name, exc))
+                    log("ERROR", "%s: could not synchronize releases: %s" % (name, exc))
+                    errors += 1
             continue
 
         skipped += 1
@@ -651,26 +669,30 @@ def main():
         try:
             align_interval(cfg, name, existing, dry_run)
         except Exception as exc:
-            fail("%s: could not update mirror interval: %s" % (name, exc))
+            log("ERROR", "%s: could not update mirror interval: %s" % (name, exc))
+            errors += 1
 
         if truthy(cfg["SYNC_RELEASES"]):
             try:
                 stats = sync_releases(cfg, name, dry_run)
                 for key in release_totals:
                     release_totals[key] += stats[key]
+                errors += stats["errors"]
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", "replace")[:300]
-                fail("%s: release sync failed (HTTP %s): %s"
-                     % (name, exc.code, detail))
+                log("ERROR", "%s: release sync failed (HTTP %s): %s"
+                    % (name, exc.code, detail))
+                errors += 1
             except Exception as exc:
-                fail("%s: release sync failed: %s" % (name, exc))
+                log("ERROR", "%s: release sync failed: %s" % (name, exc))
+                errors += 1
 
     github_names = {r["name"].lower() for r in repos}
     try:
         page, orphans = 1, []
         while True:
-            _, batch = api("%s/api/v1/user/repos?limit=50&page=%d" % (cfg["GITEA_URL"], page),
-                           token=cfg["GITEA_TOKEN"])
+            batch = api("%s/api/v1/user/repos?limit=50&page=%d" % (cfg["GITEA_URL"], page),
+                        token=cfg["GITEA_TOKEN"]).body
             if not batch:
                 break
             orphans.extend(

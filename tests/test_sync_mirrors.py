@@ -33,9 +33,6 @@ def github_release(**overrides):
 
 
 class ReleaseSyncTests(unittest.TestCase):
-    def setUp(self):
-        mirror.errors = 0
-
     @mock.patch.object(mirror, "upload_release_asset")
     @mock.patch.object(mirror, "download_github_asset")
     @mock.patch.object(mirror, "github_release_assets")
@@ -59,13 +56,14 @@ class ReleaseSyncTests(unittest.TestCase):
         gitea_tags.return_value = {"v1.0.0"}
         github_assets.return_value = [asset]
         download_asset.return_value = (io.BytesIO(b"zip"), 3)
-        api.return_value = (201, {"id": 901, "tag_name": "v1.0.0", "assets": []})
+        api.return_value = mirror.Response(
+            201, {"id": 901, "tag_name": "v1.0.0", "assets": []}, {})
 
         stats = mirror.sync_releases(config(), "project", False)
 
         self.assertEqual(1, stats["created"])
         self.assertEqual(1, stats["assets"])
-        self.assertEqual(0, mirror.errors)
+        self.assertEqual(0, stats["errors"])
         self.assertEqual("POST", api.call_args.kwargs["method"])
         self.assertEqual("v1.0.0", api.call_args.kwargs["payload"]["tag_name"])
         upload_asset.assert_called_once()
@@ -118,9 +116,10 @@ class ReleaseSyncTests(unittest.TestCase):
     @mock.patch.object(mirror, "api")
     def test_creates_draft_without_requiring_mirrored_tag(
             self, api, github_releases, gitea_releases, gitea_tags):
-        api.return_value = (
+        api.return_value = mirror.Response(
             201,
             {"id": 901, "tag_name": "v1.0.0", "draft": True, "assets": []},
+            {},
         )
 
         stats = mirror.sync_releases(
@@ -148,7 +147,8 @@ class ReleaseSyncTests(unittest.TestCase):
         }
         github_releases.return_value = [source]
         gitea_releases.return_value = [target]
-        api.return_value = (200, dict(target, body="New notes", prerelease=True))
+        api.return_value = mirror.Response(
+            200, dict(target, body="New notes", prerelease=True), {})
 
         stats = mirror.sync_releases(
             config(SYNC_RELEASE_ASSETS="false"), "project", False)
