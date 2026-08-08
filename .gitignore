@@ -1,0 +1,9 @@
+# Real configuration -- contains GitHub and Gitea tokens.
+mirror.env
+
+# Runtime output
+sync.log
+sync.log.tmp
+
+__pycache__/
+*.pyc
