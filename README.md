@@ -26,8 +26,8 @@ Keeping the repositories' *git content* up to date remains Gitea's job.
 
 ### Architecture
 
-- [Architecture diagram](docs/architecture/sync_mirrors.architecture.html)
-- [Sequence diagram](docs/architecture/sync_mirrors.sequence.html)
+- [Architecture diagram](https://andre-bzk.github.io/github-to-gitea-mirror/architecture/sync_mirrors.architecture.html)
+- [Sequence diagram](https://andre-bzk.github.io/github-to-gitea-mirror/architecture/sync_mirrors.sequence.html)
 
 ### Requirements
 
@@ -241,8 +241,8 @@ bleibt Giteas Aufgabe.
 
 ### Architektur
 
-- [Architecture-Diagramm](docs/architecture/sync_mirrors.architecture.html)
-- [Sequence-Diagramm](docs/architecture/sync_mirrors.sequence.html)
+- [Architecture-Diagramm](https://andre-bzk.github.io/github-to-gitea-mirror/architecture/sync_mirrors.architecture.html)
+- [Sequence-Diagramm](https://andre-bzk.github.io/github-to-gitea-mirror/architecture/sync_mirrors.sequence.html)
 
 ### Voraussetzungen
 
