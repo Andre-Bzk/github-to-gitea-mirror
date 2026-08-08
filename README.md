@@ -6,6 +6,10 @@
 
 ## English
 
+> **Disclaimer:** This project was vibe coded with Claude Code — architecture
+> and structure were planned together with AI, and all implementation was done
+> through prompts. Not a single line was written by hand.
+
 Mirrors **all** GitHub repositories of a user into a self-hosted Gitea instance
 as pull mirrors — including repositories created later.
 
@@ -139,6 +143,35 @@ remaining validity, warns from 14 days out and exits non-zero once expired:
 | `mirror.env` | Real config with secrets — git-ignored, `chmod 600` |
 | `sync.log` | Last ~2000 log lines |
 
+### Developer flow
+
+The control flow is intentionally linear:
+
+1. Load `mirror.env`, then let environment variables override individual keys.
+2. Read all GitHub repositories for `GITHUB_USER`.
+3. Apply the fork and archived-repository filters.
+4. For each repository, query Gitea for a repository with the same name.
+5. If it is missing, create a Gitea pull mirror.
+6. If it already exists and is a mirror, align its pull interval.
+7. Synchronize GitHub release metadata and uploaded assets.
+8. Report Gitea mirrors that no longer have a GitHub counterpart.
+
+Keep these invariants in mind when changing the code:
+
+- Gitea owns the recurring git sync for branches and tags. This script only
+  creates missing mirrors, aligns their interval and fills the release gap.
+- A newly created mirror may not have fetched its tags yet. Non-draft releases
+  therefore wait until the tag appears in Gitea and are retried by a later run.
+- The script never deletes target-side data. Missing upstream repositories,
+  releases or assets are reported and left in Gitea.
+- Asset names are treated as stable backup keys. If an upstream asset with the
+  same name has a different size, the existing Gitea asset is kept.
+- Private mirror credentials are stored by Gitea when the mirror is created.
+  Rotating `GITHUB_TOKEN` in `mirror.env` does not update existing private
+  mirrors.
+- `DRY_RUN=true` should avoid all writes. It may still query both APIs to show
+  what would happen.
+
 ### Tests
 
 Run the unit tests from the repository root:
@@ -181,6 +214,10 @@ mirrors are unaffected — they clone without credentials.
 ---
 
 ## Deutsch
+
+> **Hinweis:** Dieses Projekt wurde mit Claude Code vibe coded — Architektur und
+> Struktur wurden gemeinsam mit KI geplant, die gesamte Implementierung erfolgte
+> per Prompt. Keine einzige Zeile wurde von Hand geschrieben.
 
 Spiegelt **alle** GitHub-Repositories eines Benutzers als Pull-Mirror in eine
 selbst gehostete Gitea-Instanz — auch Repositories, die erst später entstehen.
@@ -321,6 +358,39 @@ Ablauf mit Exit-Code 1:
 | `mirror.env.example` | Konfigurationsvorlage |
 | `mirror.env` | Echte Konfiguration mit Secrets — git-ignoriert, `chmod 600` |
 | `sync.log` | Die letzten ~2000 Log-Zeilen |
+
+### Entwickler-Ablauf
+
+Der Kontrollfluss ist bewusst linear:
+
+1. `mirror.env` laden, danach einzelne Schlüssel durch Umgebungsvariablen
+   überschreiben lassen.
+2. Alle GitHub-Repositories für `GITHUB_USER` lesen.
+3. Fork- und Archiv-Filter anwenden.
+4. Für jedes Repository in Gitea nach einem Repository mit gleichem Namen
+   suchen.
+5. Fehlt es, einen Gitea-Pull-Mirror anlegen.
+6. Existiert es bereits und ist ein Mirror, das Pull-Intervall abgleichen.
+7. GitHub-Release-Metadaten und hochgeladene Assets synchronisieren.
+8. Gitea-Mirrors melden, die kein GitHub-Gegenstück mehr haben.
+
+Diese Invarianten sind bei Codeänderungen wichtig:
+
+- Gitea besitzt den wiederkehrenden Git-Sync für Branches und Tags. Dieses
+  Skript legt nur fehlende Mirrors an, gleicht deren Intervall ab und schließt
+  die Release-Lücke.
+- Ein neu angelegter Mirror hat seine Tags möglicherweise noch nicht geholt.
+  Nicht-Draft-Releases warten deshalb, bis der Tag in Gitea sichtbar ist, und
+  werden bei einem späteren Lauf erneut versucht.
+- Das Skript löscht nie Daten auf der Zielseite. Fehlende Upstream-Repositories,
+  Releases oder Assets werden gemeldet und in Gitea behalten.
+- Asset-Namen gelten als stabile Backup-Schlüssel. Hat ein Upstream-Asset mit
+  gleichem Namen eine andere Größe, bleibt das vorhandene Gitea-Asset erhalten.
+- Zugangsdaten für private Mirrors werden beim Anlegen von Gitea gespeichert.
+  Ein Wechsel von `GITHUB_TOKEN` in `mirror.env` aktualisiert bestehende private
+  Mirrors nicht.
+- `DRY_RUN=true` darf keine Schreibzugriffe ausführen. API-Abfragen sind erlaubt,
+  damit sichtbar wird, was passieren würde.
 
 ### Tests
 
