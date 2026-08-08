@@ -1,0 +1,318 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "GitHub to Gitea Mirror Sync",
+    "subtitle": "Runtime sequence of sync_mirrors.py: config, repository mirroring, release sync, streamed asset copy, orphan check, and exit status",
+    "output": "sync_mirrors.sequence.html",
+    "viewBox": [940, 1060],
+    "animation": "none",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "startup",
+        "label": "Startup and repository list",
+        "focus": ["runner", "script", "config", "github"],
+        "note": "The script merges file and environment config, then lists owned GitHub repositories."
+      },
+      {
+        "id": "repo-loop",
+        "label": "Repository mirror loop",
+        "focus": ["script", "github", "gitea"],
+        "note": "Each GitHub repository is matched against Gitea before migration or interval alignment."
+      },
+      {
+        "id": "release-assets",
+        "label": "Release and asset sync",
+        "focus": ["github", "script", "tmpfile", "gitea"],
+        "note": "Release metadata is reconciled and missing assets stream through a temporary file."
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "runner",
+      "type": "external",
+      "label": "Runner",
+      "sublabel": "cron or shell"
+    },
+    {
+      "id": "script",
+      "type": "backend",
+      "label": "Sync Script",
+      "sublabel": "mirror coordinator"
+    },
+    {
+      "id": "config",
+      "type": "security",
+      "label": "Config",
+      "sublabel": "mirror.env + env"
+    },
+    {
+      "id": "github",
+      "type": "cloud",
+      "label": "GitHub API",
+      "sublabel": "repos, releases"
+    },
+    {
+      "id": "gitea",
+      "type": "cloud",
+      "label": "Gitea API",
+      "sublabel": "mirrors and releases"
+    },
+    {
+      "id": "tmpfile",
+      "type": "database",
+      "label": "Temp File",
+      "sublabel": "streamed asset buffer"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 318,
+      "label": "Startup"
+    },
+    {
+      "from": 334,
+      "to": 578,
+      "label": "Mirror loop"
+    },
+    {
+      "from": 596,
+      "to": 844,
+      "label": "Release sync"
+    },
+    {
+      "from": 862,
+      "to": 960,
+      "label": "Finish"
+    }
+  ],
+  "messages": [
+    {
+      "id": "run-script",
+      "from": "runner",
+      "to": "script",
+      "y": 180,
+      "label": "start sync run",
+      "variant": "emphasis"
+    },
+    {
+      "id": "load-config",
+      "from": "script",
+      "to": "config",
+      "y": 222,
+      "label": "load defaults, mirror.env, environment",
+      "variant": "security"
+    },
+    {
+      "id": "config-values",
+      "from": "config",
+      "to": "script",
+      "y": 264,
+      "label": "normalized settings",
+      "variant": "return"
+    },
+    {
+      "id": "list-repos",
+      "from": "script",
+      "to": "github",
+      "y": 306,
+      "label": "list owned repositories",
+      "variant": "emphasis"
+    },
+    {
+      "id": "repos-back",
+      "from": "github",
+      "to": "script",
+      "y": 348,
+      "label": "repos + token expiry header",
+      "variant": "return"
+    },
+    {
+      "id": "check-repo",
+      "from": "script",
+      "to": "gitea",
+      "y": 390,
+      "label": "query matching repository",
+      "variant": "default"
+    },
+    {
+      "id": "repo-state",
+      "from": "gitea",
+      "to": "script",
+      "y": 432,
+      "label": "existing mirror or 404",
+      "variant": "return"
+    },
+    {
+      "id": "create-or-align",
+      "from": "script",
+      "to": "gitea",
+      "y": 474,
+      "label": "migrate missing mirror or patch interval",
+      "variant": "emphasis"
+    },
+    {
+      "id": "mirror-result",
+      "from": "gitea",
+      "to": "script",
+      "y": 516,
+      "label": "mirror created or updated",
+      "variant": "return"
+    },
+    {
+      "id": "get-source-releases",
+      "from": "script",
+      "to": "github",
+      "y": 618,
+      "label": "list repository releases",
+      "variant": "default"
+    },
+    {
+      "id": "source-releases",
+      "from": "github",
+      "to": "script",
+      "y": 660,
+      "label": "source release metadata",
+      "variant": "return"
+    },
+    {
+      "id": "get-target-releases",
+      "from": "script",
+      "to": "gitea",
+      "y": 702,
+      "label": "list releases and tags",
+      "variant": "default"
+    },
+    {
+      "id": "target-state",
+      "from": "gitea",
+      "to": "script",
+      "y": 744,
+      "label": "target releases, assets, tags",
+      "variant": "return"
+    },
+    {
+      "id": "upsert-release",
+      "from": "script",
+      "to": "gitea",
+      "y": 786,
+      "label": "create or patch changed release",
+      "variant": "emphasis"
+    },
+    {
+      "id": "download-asset",
+      "from": "github",
+      "to": "tmpfile",
+      "y": 828,
+      "label": "stream missing asset",
+      "variant": "dashed"
+    },
+    {
+      "id": "upload-asset",
+      "from": "tmpfile",
+      "to": "gitea",
+      "y": 870,
+      "label": "multipart upload",
+      "variant": "dashed"
+    },
+    {
+      "id": "orphan-check",
+      "from": "script",
+      "to": "gitea",
+      "y": 912,
+      "label": "list mirrors for orphan warning",
+      "variant": "default"
+    },
+    {
+      "id": "exit-code",
+      "from": "script",
+      "to": "runner",
+      "y": 954,
+      "label": "summary log and exit code",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "script",
+      "from": 174,
+      "to": 960,
+      "type": "backend"
+    },
+    {
+      "participant": "config",
+      "from": 216,
+      "to": 270,
+      "type": "security"
+    },
+    {
+      "participant": "github",
+      "from": 300,
+      "to": 354,
+      "type": "cloud"
+    },
+    {
+      "participant": "gitea",
+      "from": 384,
+      "to": 522,
+      "type": "cloud"
+    },
+    {
+      "participant": "github",
+      "from": 612,
+      "to": 666,
+      "type": "cloud"
+    },
+    {
+      "participant": "gitea",
+      "from": 696,
+      "to": 792,
+      "type": "cloud"
+    },
+    {
+      "participant": "tmpfile",
+      "from": 822,
+      "to": 876,
+      "type": "database"
+    },
+    {
+      "participant": "gitea",
+      "from": 864,
+      "to": 918,
+      "type": "cloud"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Mirror ownership",
+      "items": [
+        "GitHub repositories drive the run; Gitea state is reconciled per repository",
+        "Existing non-mirror repositories are warned about and left untouched",
+        "Deleted or renamed upstream repositories are reported as orphaned mirrors"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Release policy",
+      "items": [
+        "Release metadata is created or patched only when fields differ",
+        "Draft handling waits until the mirrored tag exists in Gitea",
+        "No Gitea-side release or asset is deleted by the script"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Asset streaming",
+      "items": [
+        "GitHub assets download in chunks into a temporary file",
+        "Multipart upload streams the temporary file to Gitea",
+        "Existing same-name assets are preserved, with size mismatch warnings"
+      ]
+    }
+  ]
+}

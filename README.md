@@ -24,6 +24,11 @@ Keeping the repositories' *git content* up to date remains Gitea's job.
 | Pull new commits into **existing** mirrors | Gitea itself | `MIRROR_INTERVAL` |
 | Synchronize release metadata and uploaded assets | this script (cron) | daily |
 
+### Architecture
+
+- [Architecture diagram](docs/architecture/sync_mirrors.architecture.html)
+- [Sequence diagram](docs/architecture/sync_mirrors.sequence.html)
+
 ### Requirements
 
 - Gitea 1.20+ with an API token (scopes `write:repository,read:user`)
@@ -233,6 +238,11 @@ bleibt Giteas Aufgabe.
 | **Neue** Repositories finden, Mirror anlegen | dieses Skript (Cron) | täglich |
 | Commits in **bestehende** Mirrors holen | Gitea selbst | `MIRROR_INTERVAL` |
 | Release-Metadaten und hochgeladene Assets synchronisieren | dieses Skript (Cron) | täglich |
+
+### Architektur
+
+- [Architecture-Diagramm](docs/architecture/sync_mirrors.architecture.html)
+- [Sequence-Diagramm](docs/architecture/sync_mirrors.sequence.html)
 
 ### Voraussetzungen
 

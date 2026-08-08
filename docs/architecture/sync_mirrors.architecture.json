@@ -1,0 +1,258 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "GitHub to Gitea Mirror Architecture",
+    "subtitle": "Runtime components and trust boundaries used by sync_mirrors.py for repository mirrors, releases, and streamed release assets",
+    "output": "sync_mirrors.architecture.html",
+    "viewBox": [1180, 780],
+    "animation": "none",
+    "visual_preset": "blueprint",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Andre-Bzk/github-to-gitea-mirror.git",
+      "revision": "18e926a764b6ee969ea61132bd446e22ab250a5b"
+    },
+    "views": [
+      {
+        "id": "local-runtime",
+        "label": "Local runtime",
+        "focus": ["runner", "config", "script", "tmp_asset"],
+        "note": "The scheduled or manual run loads configuration and keeps large assets out of RAM."
+      },
+      {
+        "id": "repository-sync",
+        "label": "Repository mirror sync",
+        "focus": ["script", "github_api", "github_repos", "gitea_api", "gitea_mirrors"],
+        "note": "GitHub repository inventory drives Gitea mirror creation and interval alignment."
+      },
+      {
+        "id": "release-assets",
+        "label": "Release and asset sync",
+        "focus": ["script", "github_releases", "tmp_asset", "gitea_releases"],
+        "note": "Release metadata is reconciled and missing assets stream through a temporary file."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "runner",
+      "type": "external",
+      "label": "Runner",
+      "sublabel": "cron or shell",
+      "pos": [70, 355],
+      "size": [126, 62]
+    },
+    {
+      "id": "config",
+      "type": "security",
+      "label": "Config",
+      "sublabel": "env + tokens",
+      "pos": [305, 155],
+      "size": [134, 64],
+      "sources": [
+        {
+          "path": "sync_mirrors.py",
+          "label": "load_config"
+        }
+      ]
+    },
+    {
+      "id": "script",
+      "type": "backend",
+      "label": "Sync Script",
+      "sublabel": "coordinator",
+      "pos": [300, 355],
+      "size": [144, 66],
+      "sources": [
+        {
+          "path": "sync_mirrors.py",
+          "label": "main"
+        }
+      ]
+    },
+    {
+      "id": "tmp_asset",
+      "type": "database",
+      "label": "Temp Asset",
+      "sublabel": "chunk buffer",
+      "pos": [565, 430],
+      "size": [144, 64],
+      "sources": [
+        {
+          "path": "sync_mirrors.py",
+          "label": "download asset"
+        }
+      ]
+    },
+    {
+      "id": "github_api",
+      "type": "cloud",
+      "label": "GitHub API",
+      "sublabel": "REST",
+      "pos": [565, 165],
+      "size": [136, 64],
+      "tag": "Bearer token"
+    },
+    {
+      "id": "github_repos",
+      "type": "database",
+      "label": "Source Repos",
+      "sublabel": "owned projects",
+      "pos": [810, 95],
+      "size": [142, 64]
+    },
+    {
+      "id": "github_releases",
+      "type": "database",
+      "label": "GH Releases",
+      "sublabel": "metadata + assets",
+      "pos": [810, 255],
+      "size": [148, 64]
+    },
+    {
+      "id": "gitea_api",
+      "type": "cloud",
+      "label": "Gitea API",
+      "sublabel": "local or LAN",
+      "pos": [565, 610],
+      "size": [136, 64],
+      "tag": "token"
+    },
+    {
+      "id": "gitea_mirrors",
+      "type": "database",
+      "label": "Pull Mirrors",
+      "sublabel": "git backup",
+      "pos": [810, 540],
+      "size": [142, 64]
+    },
+    {
+      "id": "gitea_releases",
+      "type": "database",
+      "label": "Gitea Releases",
+      "sublabel": "metadata + assets",
+      "pos": [810, 680],
+      "size": [150, 64]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Local host running sync_mirrors.py",
+      "wraps": ["runner", "config", "script", "tmp_asset"]
+    },
+    {
+      "kind": "security-group",
+      "label": "Configuration and credentials",
+      "wraps": ["config"]
+    },
+    {
+      "kind": "region",
+      "label": "GitHub account",
+      "wraps": ["github_api", "github_repos", "github_releases"]
+    },
+    {
+      "kind": "region",
+      "label": "Gitea instance",
+      "wraps": ["gitea_api", "gitea_mirrors", "gitea_releases"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "starts",
+      "from": "runner",
+      "to": "script",
+      "label": "starts run",
+      "variant": "emphasis",
+      "labelDy": 46
+    },
+    {
+      "id": "loads",
+      "from": "script",
+      "to": "config",
+      "label": "loads settings",
+      "variant": "security"
+    },
+    {
+      "id": "lists-repos",
+      "from": "script",
+      "to": "github_api",
+      "label": "lists repos",
+      "variant": "emphasis"
+    },
+    {
+      "id": "repo-source",
+      "from": "github_api",
+      "to": "github_repos",
+      "label": "reads",
+      "variant": "default"
+    },
+    {
+      "id": "checks-mirror",
+      "from": "script",
+      "to": "gitea_api",
+      "label": "checks mirrors",
+      "variant": "emphasis"
+    },
+    {
+      "id": "mirror-target",
+      "from": "gitea_api",
+      "to": "gitea_mirrors",
+      "label": "create or patch",
+      "variant": "emphasis"
+    },
+    {
+      "id": "asset-download",
+      "from": "github_releases",
+      "to": "tmp_asset",
+      "label": "streams asset",
+      "variant": "dashed"
+    },
+    {
+      "id": "asset-upload",
+      "from": "tmp_asset",
+      "to": "gitea_api",
+      "label": "uploads asset",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "release-api",
+      "from": "gitea_api",
+      "to": "gitea_releases",
+      "label": "create or patch",
+      "variant": "default"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Primary responsibility",
+      "items": [
+        "GitHub is the source of repository and release inventory",
+        "The script creates missing Gitea pull mirrors and aligns mirror intervals",
+        "Existing Gitea content is preserved rather than deleted"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Trust boundary",
+      "items": [
+        "GitHub requests use a Bearer token when configured",
+        "Gitea requests use token authentication",
+        "Config values come from mirror.env and environment variables"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Asset path",
+      "items": [
+        "Release assets are downloaded in chunks",
+        "A temporary file avoids buffering large assets in memory",
+        "Multipart upload sends the same stream to Gitea"
+      ]
+    }
+  ]
+}
